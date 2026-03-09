@@ -7,7 +7,7 @@ import './Profile.css';
 // 🌟 Import Firebase
 import { auth, db } from '../firebase';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
-import { updatePassword, signOut } from 'firebase/auth';
+import { updatePassword, signOut } from 'firebase/auth'; 
 
 const Profile: React.FC = () => {
   const history = useHistory();
@@ -32,24 +32,29 @@ const Profile: React.FC = () => {
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
   const [passwordError, setPasswordError] = useState('');
 
-  // 🌟 ดึงข้อมูลโปรไฟล์จาก Firebase
-  useIonViewWillEnter(async () => {
-    const user = auth.currentUser;
-    if (!user) {
-      history.push('/welcome'); 
+  // 🌟 จุดที่แก้ปัญหาเด้งออก! (ใช้ localStorage เช็คเหมือนหน้า Home)
+  useIonViewWillEnter(() => {
+    const email = localStorage.getItem('current_user_email');
+    if (!email) {
+      // ถ้าไม่มีอีเมลในระบบ ค่อยเด้งไปหน้า login
+      history.push('/welcome');
       return;
     }
-    const currentEmail = user.email!;
+    
+    // ถ้ามีอีเมล ให้ดึงข้อมูลโปรไฟล์เลย
+    loadProfileData(email);
+  });
 
+  const loadProfileData = async (userEmail: string) => {
     try {
-      const userDoc = await getDoc(doc(db, "users", currentEmail));
+      const userDoc = await getDoc(doc(db, "users", userEmail));
       if (userDoc.exists()) {
         const data = userDoc.data();
         setUserData({
           name: data.name || 'ผู้ใช้งาน',
           avatar: data.avatar || '',
           role: data.role || 'Cute User♥',
-          email: currentEmail
+          email: userEmail
         });
         setEditName(data.name || '');
         setEditImage(data.avatar || '');
@@ -68,7 +73,7 @@ const Profile: React.FC = () => {
     } catch (e) {
       console.error("Error loading profile", e);
     }
-  });
+  };
 
   const handleEditFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -92,7 +97,6 @@ const Profile: React.FC = () => {
     }
   };
 
-  // 🌟 อัปเดตโปรไฟล์บน Firebase
   const handleUpdateProfile = async () => {
     try {
       const userRef = doc(db, "users", userData.email);
@@ -108,7 +112,6 @@ const Profile: React.FC = () => {
     }
   };
 
-  // 🌟 เปลี่ยนรหัสผ่านด้วย Firebase Auth
   const handleChangePassword = async () => {
     setPasswordError('');
     if (!newPassword || !confirmNewPassword) {
@@ -145,10 +148,11 @@ const Profile: React.FC = () => {
           setPasswordError('เกิดข้อผิดพลาดในการเปลี่ยนรหัสผ่าน');
         }
       }
+    } else {
+      setPasswordError('ไม่พบเซสชันการยืนยันตัวตน กรุณาล็อกอินใหม่');
     }
   };
 
-  // 🌟 ออกจากระบบ Firebase
   const handleLogOut = () => {
     presentAlert({
       header: 'ออกจากระบบ',
@@ -212,7 +216,6 @@ const Profile: React.FC = () => {
         </div>
       </IonContent>
 
-      {/* Modal แก้ไขโปรไฟล์ */}
       <IonModal isOpen={showEditModal} onDidDismiss={() => setShowEditModal(false)} className="modern-form-modal">
          <div style={{ padding: '30px 24px' }}>
             <h2 className="modal-title-modern">แก้ไขโปรไฟล์</h2>
@@ -232,7 +235,6 @@ const Profile: React.FC = () => {
          </div>
       </IonModal>
 
-      {/* Modal เปลี่ยนรหัสผ่าน */}
       <IonModal isOpen={showPasswordModal} onDidDismiss={() => setShowPasswordModal(false)} className="modern-form-modal">
          <div style={{ padding: '30px 24px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
@@ -259,7 +261,6 @@ const Profile: React.FC = () => {
          </div>
       </IonModal>
 
-      {/* Modal เกี่ยวกับแอป */}
       <IonModal isOpen={showAboutModal} onDidDismiss={() => setShowAboutModal(false)} className="modern-form-modal">
         <div style={{ padding: '40px 24px', textAlign: 'center', position: 'relative' }}>
           <button onClick={() => setShowAboutModal(false)} style={{ position: 'absolute', top: '20px', right: '20px', background: 'none', border: 'none', cursor: 'pointer' }}>
