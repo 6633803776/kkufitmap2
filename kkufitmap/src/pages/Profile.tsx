@@ -32,16 +32,12 @@ const Profile: React.FC = () => {
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
   const [passwordError, setPasswordError] = useState('');
 
-  // 🌟 จุดที่แก้ปัญหาเด้งออก! (ใช้ localStorage เช็คเหมือนหน้า Home)
   useIonViewWillEnter(() => {
     const email = localStorage.getItem('current_user_email');
     if (!email) {
-      // ถ้าไม่มีอีเมลในระบบ ค่อยเด้งไปหน้า login
       history.push('/welcome');
       return;
     }
-    
-    // ถ้ามีอีเมล ให้ดึงข้อมูลโปรไฟล์เลย
     loadProfileData(email);
   });
 
@@ -50,6 +46,7 @@ const Profile: React.FC = () => {
       const userDoc = await getDoc(doc(db, "users", userEmail));
       if (userDoc.exists()) {
         const data = userDoc.data();
+        
         setUserData({
           name: data.name || 'ผู้ใช้งาน',
           avatar: data.avatar || '',
@@ -59,9 +56,12 @@ const Profile: React.FC = () => {
         setEditName(data.name || '');
         setEditImage(data.avatar || '');
 
+        // 🌟 ดึงข้อมูลสถิติจาก Firebase ล้วนๆ 🌟
         const savedPlaces = data.savedPlaces || [];
         const activities = data.activities || [];
         const exploredPlaces = data.exploredPlaces || [];
+        
+        // นับสถานที่ที่ไม่ซ้ำกัน
         const uniqueVisitedLocations = new Set(activities.map((act: any) => act.locationName));
 
         setStats({

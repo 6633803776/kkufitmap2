@@ -4,6 +4,10 @@ import { MapPin, Star, HeartCrack, Heart, X, Users, Clock, Navigation, Phone, Sh
 import { useHistory } from 'react-router-dom';
 import './Home.css'; 
 
+// 🌟 Import Firebase 🌟
+import { db } from '../firebase';
+import { doc, getDoc, updateDoc } from 'firebase/firestore';
+
 interface Place {
   id: string;
   name: string;
@@ -25,6 +29,7 @@ const Saved: React.FC = () => {
   const [savedPlaces, setSavedPlaces] = useState<Place[]>([]);
   const [selectedPlace, setSelectedPlace] = useState<Place | null>(null);
 
+  // 🌟 โหลดข้อมูลตอนเปิดหน้านี้
   useIonViewWillEnter(() => {
     const email = localStorage.getItem('current_user_email');
     if (!email) {
@@ -32,9 +37,19 @@ const Saved: React.FC = () => {
       return;
     }
     setCurrentUserEmail(email);
-    const saved = JSON.parse(localStorage.getItem('saved_places_' + email) || '[]');
-    setSavedPlaces(saved);
+    fetchSavedPlacesFromFirebase(email); // ดึงจากคลาวด์
   });
+
+  const fetchSavedPlacesFromFirebase = async (email: string) => {
+    try {
+      const userDoc = await getDoc(doc(db, "users", email));
+      if (userDoc.exists()) {
+        setSavedPlaces(userDoc.data().savedPlaces || []);
+      }
+    } catch (e) {
+      console.error("Error fetching saved places:", e);
+    }
+  };
 
   useEffect(() => {
     const getDistanceNum = (lat1: number, lon1: number, lat2: number, lon2: number) => {
@@ -45,7 +60,6 @@ const Saved: React.FC = () => {
       return R * 2 * Math.asin(Math.sqrt(a));
     };
 
-    // 🌟 ดึง GPS พร้อมระบบป้องกันการเพี้ยน 🌟
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (position) => {
@@ -53,7 +67,6 @@ const Saved: React.FC = () => {
           let lng = position.coords.longitude;
           
           if (getDistanceNum(lat, lng, 16.4743, 102.8231) > 150) {
-            // ถ้าพิกัดคอมเพี้ยนไปไกลกว่า 150km ให้ตบกลับมา มข.
             lat = 16.4743;
             lng = 102.8231;
           }
@@ -65,15 +78,23 @@ const Saved: React.FC = () => {
     }
   }, []);
 
-  const removeSaved = (id: string, e?: React.MouseEvent) => {
+  // 🌟 ฟังก์ชันลบสถานที่และอัปเดตลง Firebase 🌟
+  const removeSaved = async (id: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation(); 
     const updated = savedPlaces.filter(p => p.id !== id);
-    setSavedPlaces(updated);
-    
-    localStorage.setItem('saved_places_' + currentUserEmail, JSON.stringify(updated));
+    setSavedPlaces(updated); // อัปเดตหน้าจอทันที
     
     if (selectedPlace && selectedPlace.id === id) {
       setSelectedPlace(null);
+    }
+
+    try {
+      // ส่งคำสั่งลบไปอัปเดตบนคลาวด์
+      await updateDoc(doc(db, "users", currentUserEmail), {
+        savedPlaces: updated
+      });
+    } catch (error) {
+      console.error("Error removing saved place", error);
     }
   };
 

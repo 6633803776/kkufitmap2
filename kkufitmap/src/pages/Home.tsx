@@ -4,6 +4,10 @@ import { Search, CloudSun, MapPin, Star, Heart, X, Sun, CloudRain, Users, Clock,
 import { useHistory } from 'react-router-dom'; 
 import './Home.css';
 
+// 🌟 Import Firebase
+import { db } from '../firebase';
+import { doc, getDoc, updateDoc } from 'firebase/firestore';
+
 interface Place {
   id: string;
   name: string;
@@ -26,7 +30,6 @@ const HomeTab: React.FC = () => {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [searchQuery, setSearchQuery] = useState<string>('');
   
-  // State เก็บตำแหน่งปัจจุบัน (เริ่มที่ มข.)
   const [userLocation, setUserLocation] = useState({ lat: 16.4743, lng: 102.8231 });
 
   const [weather, setWeather] = useState({
@@ -51,11 +54,22 @@ const HomeTab: React.FC = () => {
       return;
     }
     setCurrentUserEmail(email);
-    const saved = JSON.parse(localStorage.getItem('saved_places_' + email) || '[]');
-    setSavedPlaces(saved);
+    fetchSavedPlacesFromFirebase(email); // 🌟 โหลดจาก Firebase
   });
 
-  const toggleSave = (place: Place, e: React.MouseEvent) => {
+  const fetchSavedPlacesFromFirebase = async (email: string) => {
+    try {
+      const userDoc = await getDoc(doc(db, "users", email));
+      if (userDoc.exists()) {
+        setSavedPlaces(userDoc.data().savedPlaces || []);
+      }
+    } catch (e) {
+      console.error("Error fetching saved places:", e);
+    }
+  };
+
+  // 🌟 บันทึก/ยกเลิก สถานที่โปรด ลง Firebase
+  const toggleSave = async (place: Place, e: React.MouseEvent) => {
     e.stopPropagation();
     let updatedSaved = [...savedPlaces];
     const isAlreadySaved = updatedSaved.some(p => p.id === place.id);
@@ -67,10 +81,33 @@ const HomeTab: React.FC = () => {
     }
     
     setSavedPlaces(updatedSaved);
-    localStorage.setItem(`saved_places_${currentUserEmail}`, JSON.stringify(updatedSaved));
+
+    try {
+      await updateDoc(doc(db, "users", currentUserEmail), {
+        savedPlaces: updatedSaved
+      });
+    } catch (error) {
+      console.error("Error updating save status", error);
+    }
   };
 
-  // ฟังก์ชันคำนวณระยะทางจริง (ส่งกลับเป็น km)
+  // 🌟 บันทึกประวัติการกดเข้าไปดู (Explored) ลง Firebase
+  const saveExploredPlace = async (placeId: string) => {
+    try {
+      const userRef = doc(db, "users", currentUserEmail);
+      const userDoc = await getDoc(userRef);
+      if (userDoc.exists()) {
+        let explored = userDoc.data().exploredPlaces || [];
+        if (!explored.includes(placeId)) {
+          explored.push(placeId);
+          await updateDoc(userRef, { exploredPlaces: explored });
+        }
+      }
+    } catch (error) {
+      console.error("Error saving explored places", error);
+    }
+  };
+
   const calculateDistance = (lat1: number, lon1: number, lat2?: number, lon2?: number) => {
     if (!lat2 || !lon2) return 'ไม่ทราบระยะทาง';
     const R = 6371; 
@@ -81,7 +118,6 @@ const HomeTab: React.FC = () => {
     return d.toFixed(1) + ' km';
   };
 
-  // ฟังก์ชันหาค่าตัวเลขระยะทางเพื่อเช็คความเพี้ยนของ GPS
   const getDistanceNum = (lat1: number, lon1: number, lat2: number, lon2: number) => {
     const R = 6371; 
     const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -99,7 +135,7 @@ const HomeTab: React.FC = () => {
         color: 'success',
         position: 'top'
       });
-    }).catch(err => console.error('Copy failed', err));
+    });
   };
 
   useEffect(() => {
@@ -144,31 +180,24 @@ const HomeTab: React.FC = () => {
       } catch (error) { console.error("Weather error:", error); }
     };
 
-    // 🌟 ดึงตำแหน่ง GPS ของผู้ใช้ + ใส่ระบบป้องกัน GPS เพี้ยน 🌟
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (position) => {
           let lat = position.coords.latitude;
           let lng = position.coords.longitude;
-          
-          // เช็คว่าพิกัดไกลจาก มข. เกิน 150 กิโลเมตรหรือไม่ (ป้องกันคอมพิวเตอร์พาบินไปเกาหลี)
           const distFromKKU = getDistanceNum(lat, lng, 16.4743, 102.8231);
           if (distFromKKU > 150) {
-            console.log("พิกัดไกลเกินไป บังคับใช้ตำแหน่ง มข.");
-            lat = 16.4743;
-            lng = 102.8231;
-            setUserLocation({ lat, lng });
+            lat = 16.4743; lng = 102.8231;
             fetchWeatherAndLocation(lat, lng, 'อ.เมืองขอนแก่น (ตำแหน่งจำลอง)');
           } else {
-            setUserLocation({ lat, lng });
             fetchWeatherAndLocation(lat, lng, 'ตำแหน่งปัจจุบัน');
           }
+          setUserLocation({ lat, lng });
         },
         (error) => {
-          console.error("GPS access denied, using KKU default", error);
           fetchWeatherAndLocation(16.4743, 102.8231, 'ม.ขอนแก่น (KKU)');
         },
-        { enableHighAccuracy: true, timeout: 5000 } // บังคับหาพิกัดแบบแม่นยำสูง
+        { enableHighAccuracy: true, timeout: 5000 }
       );
     } else {
       fetchWeatherAndLocation(16.4743, 102.8231, 'ม.ขอนแก่น (KKU)');
@@ -180,16 +209,10 @@ const HomeTab: React.FC = () => {
       setIsLoading(true);
       try {
         const GOOGLE_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
-        console.log("🔑 เช็ค Google Key:", GOOGLE_API_KEY);
         const url = 'https://places.googleapis.com/v1/places:searchText';
         const keywords = [
-          "ฟิตเนส กังสดาล ขอนแก่น",      
-          "ฟิตเนส หลังมอ ขอนแก่น",        
-          "ฟิตเนส โนนม่วง ขอนแก่น",       
-          "KKU Fitness", 
-          "สนามกีฬา มหาวิทยาลัยขอนแก่น",   
-          "บึงสีฐาน ขอนแก่น",            
-          "สระว่ายน้ำ ขอนแก่น"
+          "ฟิตเนส กังสดาล ขอนแก่น", "ฟิตเนส หลังมอ ขอนแก่น", "ฟิตเนส โนนม่วง ขอนแก่น", 
+          "KKU Fitness", "สนามกีฬา มหาวิทยาลัยขอนแก่น", "บึงสีฐาน ขอนแก่น", "สระว่ายน้ำ ขอนแก่น"
         ];
 
         const fetchPromises = keywords.map(keyword => {
@@ -327,11 +350,7 @@ const HomeTab: React.FC = () => {
                         key={place.id} 
                         className="place-card interactive-card" 
                         onClick={() => {
-                          const explored = JSON.parse(localStorage.getItem(`explored_places_${currentUserEmail}`) || '[]');
-                          if (!explored.includes(place.id)) {
-                            explored.push(place.id);
-                            localStorage.setItem(`explored_places_${currentUserEmail}`, JSON.stringify(explored));
-                          }
+                          saveExploredPlace(place.id); // 🌟 ใช้ฟังก์ชัน Firebase 🌟
                           setSelectedPlace(place);
                         }} 
                         style={{ position: 'relative', cursor: 'pointer' }}

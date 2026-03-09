@@ -1,9 +1,13 @@
-import { IonContent, IonHeader, IonPage, IonTitle, IonToolbar, useIonViewDidEnter, IonModal, useIonToast } from '@ionic/react';
+import { IonContent, IonHeader, IonPage, IonTitle, IonToolbar, useIonViewDidEnter, IonModal, useIonToast, useIonViewWillEnter } from '@ionic/react';
 import React, { useEffect, useRef, useState } from 'react';
 import { MapPin, Star, Heart, X, Users, Clock, Navigation, Phone, Share2 } from 'lucide-react';
 import { useHistory } from 'react-router-dom';
 import './Map.css';
 import './Home.css'; 
+
+// 🌟 Import Firebase
+import { db } from '../firebase';
+import { doc, getDoc, updateDoc } from 'firebase/firestore';
 
 interface Place {
   id: string;
@@ -17,13 +21,11 @@ interface Place {
   openHours?: string;
 }
 
-// 🌟 ฟังก์ชันดาวน์โหลดแผนที่แบบปลอดภัย (ป้องกันจอขาว) 🌟
 const loadLeaflet = (): Promise<any> => {
   return new Promise((resolve, reject) => {
     // @ts-ignore
     if (window.L) return resolve(window.L);
 
-    // ป้องกันการโหลดสคริปต์ซ้ำซ้อนตอนรีเฟรช
     if (document.getElementById('leaflet-script')) {
       const interval = setInterval(() => {
         // @ts-ignore
@@ -69,17 +71,27 @@ const MapTab: React.FC = () => {
   const [savedPlaces, setSavedPlaces] = useState<Place[]>([]);
   const [selectedPlace, setSelectedPlace] = useState<Place | null>(null);
 
-  // ดึงข้อมูลอีเมลแบบปลอดภัย (ป้องกัน Error จอขาว)
-  const getSafeStorage = (key: string) => {
+  useIonViewWillEnter(() => {
+    const email = localStorage.getItem('current_user_email');
+    if (!email) {
+      history.push('/welcome');
+      return;
+    }
+    setCurrentUserEmail(email);
+    fetchSavedPlacesFromFirebase(email); // 🌟 โหลดจาก Firebase
+  });
+
+  const fetchSavedPlacesFromFirebase = async (email: string) => {
     try {
-      const data = localStorage.getItem(key);
-      return data ? JSON.parse(data) : [];
+      const userDoc = await getDoc(doc(db, "users", email));
+      if (userDoc.exists()) {
+        setSavedPlaces(userDoc.data().savedPlaces || []);
+      }
     } catch (e) {
-      return [];
+      console.error("Error fetching saved places:", e);
     }
   };
 
-  // 1. ฟังก์ชันสร้างโครงแผนที่
   const initMapBase = (L: any) => {
     if (!mapRef.current || mapInstanceRef.current) return;
     const map = L.map(mapRef.current).setView([16.4650, 102.8231], 13);
@@ -93,7 +105,23 @@ const MapTab: React.FC = () => {
     markersLayerRef.current = L.featureGroup().addTo(map);
   };
 
-  // 2. ฟังก์ชันวาดหมุด
+  // 🌟 บันทึกประวัติเข้าดู (Explored) ลง Firebase
+  const saveExploredPlace = async (placeId: string) => {
+    try {
+      const userRef = doc(db, "users", currentUserEmail);
+      const userDoc = await getDoc(userRef);
+      if (userDoc.exists()) {
+        let explored = userDoc.data().exploredPlaces || [];
+        if (!explored.includes(placeId)) {
+          explored.push(placeId);
+          await updateDoc(userRef, { exploredPlaces: explored });
+        }
+      }
+    } catch (error) {
+      console.error("Error saving explored places", error);
+    }
+  };
+
   const drawMarkers = (L: any) => {
     if (!mapInstanceRef.current || !markersLayerRef.current) return;
     markersLayerRef.current.clearLayers();
@@ -117,13 +145,7 @@ const MapTab: React.FC = () => {
           const marker = L.marker([place.lat, place.lng], { icon: customIcon });
           marker.on('click', () => {
             setSelectedPlace(place);
-            try {
-              const explored = getSafeStorage(`explored_places_${currentUserEmail}`);
-              if (!explored.includes(place.id)) {
-                explored.push(place.id);
-                localStorage.setItem(`explored_places_${currentUserEmail}`, JSON.stringify(explored));
-              }
-            } catch (e) {}
+            saveExploredPlace(place.id); // 🌟 อัปเดตคลาวด์ 🌟
           });
           marker.addTo(markersLayerRef.current);
         }
@@ -131,24 +153,13 @@ const MapTab: React.FC = () => {
     }
   };
 
-  // 🌟 3. โหลดแผนที่ตั้งแต่ตอนเปิดหน้าเว็บครั้งแรก/หรือตอนกดรีเฟรช (F5) 🌟
   useEffect(() => {
-    const email = localStorage.getItem('current_user_email');
-    if (!email) {
-      history.push('/welcome');
-      return;
-    }
-    setCurrentUserEmail(email);
-    setSavedPlaces(getSafeStorage('saved_places_' + email));
-
-    // รอให้โหลดสคริปต์เสร็จ 100% ค่อยวาดแผนที่
     loadLeaflet().then((L) => {
       initMapBase(L);
       drawMarkers(L);
     }).catch(err => console.error(err));
   }, []);
 
-  // 🌟 4. แก้บั๊กหมุดหายตอนสลับแท็บไปมา 🌟
   useIonViewDidEnter(() => {
     if (mapInstanceRef.current) {
       setTimeout(() => {
@@ -157,7 +168,6 @@ const MapTab: React.FC = () => {
     }
   });
 
-  // 🌟 5. คอยอัปเดตหมุดเมื่อ GPS หรือ สถานที่ โหลดเสร็จ 🌟
   useEffect(() => {
     // @ts-ignore
     if (window.L && mapInstanceRef.current) {
@@ -194,7 +204,7 @@ const MapTab: React.FC = () => {
   useEffect(() => {
     const fetchGooglePlaces = async () => {
       try {
-        const GOOGLE_API_KEY = 'AIzaSyDodidp2-Kpzx6chW3IRa1zMORWIzH-LpQ'; 
+        const GOOGLE_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY; 
         const url = 'https://places.googleapis.com/v1/places:searchText';
         const keywords = [
           "ฟิตเนส กังสดาล ขอนแก่น", "ฟิตเนส หลังมอ ขอนแก่น", "ฟิตเนส โนนม่วง ขอนแก่น", 
@@ -264,7 +274,8 @@ const MapTab: React.FC = () => {
     fetchGooglePlaces();
   }, []);
 
-  const toggleSave = (place: Place, e: React.MouseEvent) => {
+  // 🌟 บันทึก/ยกเลิก สถานที่โปรด ลง Firebase
+  const toggleSave = async (place: Place, e: React.MouseEvent) => {
     e.stopPropagation();
     let updatedSaved = [...savedPlaces];
     const isAlreadySaved = updatedSaved.some(p => p.id === place.id);
@@ -274,7 +285,14 @@ const MapTab: React.FC = () => {
       updatedSaved = [place, ...updatedSaved];
     }
     setSavedPlaces(updatedSaved);
-    localStorage.setItem(`saved_places_${currentUserEmail}`, JSON.stringify(updatedSaved));
+
+    try {
+      await updateDoc(doc(db, "users", currentUserEmail), {
+        savedPlaces: updatedSaved
+      });
+    } catch (error) {
+      console.error("Error updating save status", error);
+    }
   };
 
   const calculateDistance = (lat1: number, lon1: number, lat2?: number, lon2?: number) => {

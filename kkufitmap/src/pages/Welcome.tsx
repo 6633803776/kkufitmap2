@@ -4,6 +4,11 @@ import { Dumbbell, X, Mail, Lock, LogIn, UserPlus, User, Camera } from 'lucide-r
 import { useHistory } from 'react-router-dom';
 import './Welcome.css';
 
+// 🌟 Import Firebase ของจริงเข้ามาใช้งาน
+import { auth, db } from '../firebase';
+import { createUserWithEmailAndPassword, signInWithEmailAndPassword } from 'firebase/auth';
+import { doc, setDoc } from 'firebase/firestore';
+
 const Welcome: React.FC = () => {
   const history = useHistory();
   
@@ -49,6 +54,7 @@ const Welcome: React.FC = () => {
     }
   };
 
+  // 🌟 ฟังก์ชัน Login ของจริงผ่าน Firebase
   const handleLogin = async () => {
     setErrorMessage('');
     if (!email || !password) {
@@ -57,29 +63,24 @@ const Welcome: React.FC = () => {
     }
     setIsLoading(true);
     
-    // แปลงอีเมลตัวเล็กทั้งหมดและตัดช่องว่างทิ้ง เพื่อป้องกันพิมพ์ผิดพลาด
-    const userEmailKey = email.toLowerCase().trim();
-    const existingUserRaw = localStorage.getItem('user_profile_' + userEmailKey);
-    
-    setTimeout(() => {
+    try {
+      const userEmailKey = email.toLowerCase().trim();
+      
+      // ยืนยันตัวตนกับแผนก รปภ. ของ Firebase
+      await signInWithEmailAndPassword(auth, userEmailKey, password);
+      
+      localStorage.setItem('current_user_email', userEmailKey);
+      setShowLoginModal(false);
+      history.push('/home');
+    } catch (error: any) {
+      console.error(error);
+      setErrorMessage('อีเมลหรือรหัสผ่านไม่ถูกต้อง กรุณาลองใหม่อีกครั้ง');
+    } finally {
       setIsLoading(false);
-      if (existingUserRaw) {
-        const existingUser = JSON.parse(existingUserRaw);
-        
-        // 🌟 แก้ไข: ตรวจสอบรหัสผ่านให้ตรงกันจริงๆ 🌟
-        if (existingUser.password === password) {
-          localStorage.setItem('current_user_email', userEmailKey);
-          setShowLoginModal(false);
-          history.push('/home');
-        } else {
-          setErrorMessage('รหัสผ่านไม่ถูกต้อง กรุณาลองใหม่อีกครั้ง');
-        }
-      } else {
-        setErrorMessage('ไม่พบบัญชีผู้ใช้นี้ หรือคุณยังไม่ได้สมัครสมาชิก');
-      }
-    }, 1000);
+    }
   };
 
+  // 🌟 ฟังก์ชันสมัครสมาชิกของจริงผ่าน Firebase
   const handleRegister = async () => {
     setErrorMessage('');
     if (!email || !password || !confirmPassword || !displayName) {
@@ -95,28 +96,35 @@ const Welcome: React.FC = () => {
     try {
       const userEmailKey = email.toLowerCase().trim();
       
-      const userData = {
+      // 1. สร้างบัญชีผู้ใช้ใน Firebase Authentication
+      await createUserWithEmailAndPassword(auth, userEmailKey, password);
+
+      // 2. สร้างแฟ้มประวัติเก็บใน Firestore Database
+      await setDoc(doc(db, "users", userEmailKey), {
         name: displayName,
         avatar: profileImage, 
         role: 'Cute User♥',
         email: userEmailKey,
-        password: password // 🌟 แก้ไข: บันทึกรหัสผ่านลงไปด้วย เพื่อให้ตอน Log in หาเจอ 🌟
-      };
+        savedPlaces: [],
+        activities: [],
+        exploredPlaces: []
+      });
       
-      localStorage.setItem('user_profile_' + userEmailKey, JSON.stringify(userData));
-      localStorage.setItem('saved_places_' + userEmailKey, '[]');
-      localStorage.setItem('user_activities_' + userEmailKey, '[]');
-      localStorage.setItem('explored_places_' + userEmailKey, '[]');
-
+      // บันทึกสถานะว่าล็อกอินแล้วในเครื่อง
       localStorage.setItem('current_user_email', userEmailKey);
 
-      setTimeout(() => {
-        setIsLoading(false);
-        setShowRegisterModal(false);
-        history.push('/home'); 
-      }, 1500);
-    } catch (err) {
-      setErrorMessage('เกิดข้อผิดพลาดในการสมัครสมาชิก (ไฟล์รูปอาจใหญ่เกินไป)');
+      setShowRegisterModal(false);
+      history.push('/home'); 
+    } catch (err: any) {
+      console.error(err);
+      if (err.code === 'auth/email-already-in-use') {
+        setErrorMessage('อีเมลนี้ถูกใช้งานไปแล้ว');
+      } else if (err.code === 'auth/weak-password') {
+        setErrorMessage('รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร');
+      } else {
+        setErrorMessage('เกิดข้อผิดพลาด (ไฟล์รูปอาจใหญ่เกินไป)');
+      }
+    } finally {
       setIsLoading(false);
     }
   };
@@ -191,7 +199,7 @@ const Welcome: React.FC = () => {
 
               <div className="form-input-group"><User size={18} className="input-field-icon" /><input type="text" className="custom-input-modern" placeholder="ชื่อที่ต้องการให้แสดง" value={displayName} onChange={(e) => setDisplayName(e.target.value)} /></div>
               <div className="form-input-group"><Mail size={18} className="input-field-icon" /><input type="email" className="custom-input-modern" placeholder="อีเมล (Email)" value={email} onChange={(e) => setEmail(e.target.value)} /></div>
-              <div className="form-input-group"><Lock size={18} className="input-field-icon" /><input type="password" className="custom-input-modern" placeholder="รหัสผ่าน" value={password} onChange={(e) => setPassword(e.target.value)} /></div>
+              <div className="form-input-group"><Lock size={18} className="input-field-icon" /><input type="password" className="custom-input-modern" placeholder="รหัสผ่าน (อย่างน้อย 6 ตัวอักษร)" value={password} onChange={(e) => setPassword(e.target.value)} /></div>
               <div className="form-input-group"><Lock size={18} className="input-field-icon" /><input type="password" className="custom-input-modern" placeholder="ยืนยันรหัสผ่าน" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} /></div>
               <button className="save-activity-btn-modern" onClick={handleRegister} disabled={isLoading}><span>{isLoading ? 'กำลังสมัคร...' : 'สมัครสมาชิก'}</span></button>
             </div>

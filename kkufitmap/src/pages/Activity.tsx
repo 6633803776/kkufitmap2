@@ -4,6 +4,10 @@ import { Plus, Clock, Calendar, Dumbbell, Bike, Footprints, X, Check, MapPin, Ac
 import { useHistory } from 'react-router-dom'; 
 import './Home.css';
 
+// 🌟 Import Firebase
+import { db } from '../firebase';
+import { doc, getDoc, updateDoc } from 'firebase/firestore';
+
 interface ActivityRecord {
   id: string;
   type: 'walk' | 'run' | 'gym' | 'bike';
@@ -25,7 +29,6 @@ const Activity: React.FC = () => {
   const [savedPlaces, setSavedPlaces] = useState<Place[]>([]);
   
   const [isModalOpen, setIsModalOpen] = useState(false);
-  
   const [editingId, setEditingId] = useState<string | null>(null);
   
   const [selectedType, setSelectedType] = useState<'walk' | 'run' | 'gym' | 'bike'>('run');
@@ -41,25 +44,33 @@ const Activity: React.FC = () => {
       return;
     }
     setCurrentUserEmail(email);
-
-    const loadedActivities = JSON.parse(localStorage.getItem(`user_activities_${email}`) || '[]');
-    setActivities(loadedActivities);
-
-    const saved = JSON.parse(localStorage.getItem(`saved_places_${email}`) || '[]');
-    setSavedPlaces(saved);
+    fetchDataFromFirebase(email); // 🌟 โหลดจาก Firebase แทน localStorage
   });
+
+  const fetchDataFromFirebase = async (email: string) => {
+    try {
+      const userDoc = await getDoc(doc(db, "users", email));
+      if (userDoc.exists()) {
+        const data = userDoc.data();
+        const firebaseActivities = data.activities || [];
+        // เรียงใหม่ล่าสุดขึ้นก่อน
+        firebaseActivities.sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        setActivities(firebaseActivities);
+        setSavedPlaces(data.savedPlaces || []);
+      }
+    } catch (e) {
+      console.error("Error fetching activities:", e);
+    }
+  };
 
   const totalMinutes = activities.reduce((sum, act) => sum + act.durationMinutes, 0);
   const totalHours = Math.floor(totalMinutes / 60);
   const remainingMinutes = totalMinutes % 60;
-  
   const uniqueDays = new Set(activities.map(act => act.date)).size;
 
-  // 🌟 ลอจิกใหม่: อิงจาก จำนวนครั้ง -> เวลา -> ถ้าเท่ากันให้โชว์คู่ 🌟
   const getActivityStats = () => {
     if (activities.length === 0) return 'ยังไม่มี';
 
-    // 1. เก็บข้อมูลทั้งจำนวนครั้งและเวลารวม
     const stats: Record<string, { count: number, duration: number }> = {
       walk: { count: 0, duration: 0 },
       run: { count: 0, duration: 0 },
@@ -74,30 +85,22 @@ const Activity: React.FC = () => {
       }
     });
 
-    // กรองเอาเฉพาะกิจกรรมที่เคยทำ
     const activeStats = Object.entries(stats).filter(([_, data]) => data.count > 0);
     if (activeStats.length === 0) return 'ยังไม่มี';
 
-    // 2. เรียงลำดับ: เช็คจำนวนครั้งก่อน ถ้าจำนวนครั้งเท่ากันให้เช็คเวลา
     activeStats.sort((a, b) => {
-      if (b[1].count !== a[1].count) {
-        return b[1].count - a[1].count; // เรียงตามจำนวนครั้ง (มากไปน้อย)
-      }
-      return b[1].duration - a[1].duration; // ถ้าครั้งเท่ากัน เรียงตามเวลา (มากไปน้อย)
+      if (b[1].count !== a[1].count) return b[1].count - a[1].count;
+      return b[1].duration - a[1].duration; 
     });
 
-    // 3. หาสถิติอันดับ 1
     const topCount = activeStats[0][1].count;
     const topDuration = activeStats[0][1].duration;
 
-    // 4. เช็คว่ามีกิจกรรมอื่นที่ "ตีเสมอ" (Tie) กับอันดับ 1 หรือไม่ (ครั้งเท่ากัน และเวลาเท่ากันเป๊ะ)
     const tiedActivities = activeStats.filter(
       item => item[1].count === topCount && item[1].duration === topDuration
     );
 
     const typeMap: Record<string, string> = { walk: 'เดิน', run: 'วิ่ง', gym: 'ฟิตเนส', bike: 'ปั่นจักรยาน' };
-    
-    // 5. นำชื่อมาต่อกัน ถ้ามีอันเดียวก็โชว์อันเดียว ถ้ามี 2 อันจะคั่นด้วย " / "
     return tiedActivities.map(item => typeMap[item[0]]).join(' / ');
   };
 
@@ -126,7 +129,8 @@ const Activity: React.FC = () => {
     setIsModalOpen(true);
   };
 
-  const handleSaveActivity = () => {
+  // 🌟 บันทึกกิจกรรมขึ้น Firebase
+  const handleSaveActivity = async () => {
     const hrs = parseInt(hoursInput) || 0;
     const mins = parseInt(minutesInput) || 0;
     const totalMins = (hrs * 60) + mins;
@@ -150,21 +154,36 @@ const Activity: React.FC = () => {
     } else {
       updatedActivities = [newActivityData, ...activities];
     }
-
-    // เรียงให้กิจกรรมล่าสุดอยู่บนสุดเสมอ
     updatedActivities.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-
+    
     setActivities(updatedActivities);
-    localStorage.setItem(`user_activities_${currentUserEmail}`, JSON.stringify(updatedActivities));
     setIsModalOpen(false);
+
+    try {
+      // อัปเดตคลังข้อมูลใน Firebase
+      await updateDoc(doc(db, "users", currentUserEmail), {
+        activities: updatedActivities
+      });
+    } catch (e) {
+      console.error("Error saving activity:", e);
+      alert("เกิดข้อผิดพลาดในการบันทึกข้อมูล");
+    }
   };
 
-  const handleDeleteActivity = () => {
+  // 🌟 ลบกิจกรรมออกจาก Firebase
+  const handleDeleteActivity = async () => {
     if (window.confirm("คุณต้องการลบกิจกรรมนี้ใช่หรือไม่?")) {
       const updatedActivities = activities.filter(act => act.id !== editingId);
       setActivities(updatedActivities);
-      localStorage.setItem(`user_activities_${currentUserEmail}`, JSON.stringify(updatedActivities));
       setIsModalOpen(false);
+
+      try {
+        await updateDoc(doc(db, "users", currentUserEmail), {
+          activities: updatedActivities
+        });
+      } catch (e) {
+        console.error("Error deleting activity:", e);
+      }
     }
   };
 
@@ -224,7 +243,6 @@ const Activity: React.FC = () => {
 
             <div className="stat-item">
               <div className="stat-icon-wrapper" style={{ color: '#10b981' }}><Dumbbell size={18} /></div>
-              {/* 🌟 แสดงผลลัพธ์ที่ฉลาดขึ้นตรงนี้ */}
               <h3 className="stat-value" style={{ fontSize: getActivityStats().includes('/') ? '16px' : '22px' }}>
                 {getActivityStats()}
               </h3>
@@ -269,7 +287,6 @@ const Activity: React.FC = () => {
 
         </div>
 
-        {/* ================= MODAL บันทึกกิจกรรม ================= */}
         <IonModal isOpen={isModalOpen} onDidDismiss={() => setIsModalOpen(false)} className="activity-modal">
           <IonContent>
             <div className="modal-form-container">
