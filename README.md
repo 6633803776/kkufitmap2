@@ -2,7 +2,11 @@
 ## วิดีโอสาธิตวิธีการใช้งานเบื้องต้น
 https://drive.google.com/file/d/18GmKxAaCO6iFqPHAGBpAjEGF8YCKNX9f/view?usp=sharing
 ## Final Report
-
+https://drive.google.com/drive/folders/1f3WwD095LreT1zS-2XyWQgQlZwVwmOEb?usp=sharing 
+## Figma Design
+https://www.figma.com/design/gylwQ4t5dgRxTuUsC1JMkI/%E0%B9%82%E0%B8%A1%E0%B8%9A%E0%B8%B2%E0%B8%A2?node-id=0-1&t=9ULZUPmZLF0TYoGu-1 
+## Github Page
+https://mykkufitmap2.vercel.app/ 
 
 KKU FitMap คือแอปพลิเคชันสำหรับค้นหาสถานที่ออกกำลังกาย ฟิตเนส และสนามกีฬา บริเวณรอบมหาวิทยาลัยขอนแก่น (KKU) พร้อมระบบบันทึกสถานที่โปรดและประวัติการออกกำลังกายส่วนตัว
 
